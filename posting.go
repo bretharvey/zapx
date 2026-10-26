@@ -558,25 +558,34 @@ func (i *PostingsIterator) nextAtOrAfter(atOrAfter uint64) (segment.Posting, err
 	rv.norm = math.Float32frombits(uint32(normBits))
 
 	if i.includeLocs && hasLocs {
-		// prepare locations into reused slices, where we assume
-		// rv.freq >= "number of locs", since in a composite field,
-		// some component fields might have their IncludeTermVector
-		// flags disabled while other component fields are enabled
-		if rv.freq > 0 {
-			if cap(i.nextLocs) >= int(rv.freq) {
-				i.nextLocs = i.nextLocs[0:rv.freq]
-			} else {
-				i.nextLocs = make([]Location, rv.freq, rv.freq*2)
-			}
-			if cap(i.nextSegmentLocs) < int(rv.freq) {
-				i.nextSegmentLocs = make([]segment.Location, rv.freq, rv.freq*2)
-			}
-			rv.locs = i.nextSegmentLocs[:0]
-		}
-
 		numLocsBytes, err := i.locReader.readUvarint()
 		if err != nil {
 			return nil, fmt.Errorf("error reading location numLocsBytes: %v", err)
+		}
+
+		if numLocsBytes > uint64(i.locReader.Len()) {
+			return nil, fmt.Errorf("location length %d exceeds remaining chunk bytes %d", numLocsBytes, i.locReader.Len())
+		}
+
+		// prepare locations into reused slices, where we assume
+		// rv.freq >= "number of locs", since in a composite field,
+		// some component fields might have their IncludeTermVector
+		// flags disabled while other component fields are enabled.
+		// Each location is at least one byte, so the payload length caps the size.
+		n := numLocsBytes
+		if rv.freq < n {
+			n = rv.freq
+		}
+		if n > 0 {
+			if cap(i.nextLocs) >= int(n) {
+				i.nextLocs = i.nextLocs[0:n]
+			} else {
+				i.nextLocs = make([]Location, n, n*2)
+			}
+			if cap(i.nextSegmentLocs) < int(n) {
+				i.nextSegmentLocs = make([]segment.Location, n, n*2)
+			}
+			rv.locs = i.nextSegmentLocs[:0]
 		}
 
 		j := 0
